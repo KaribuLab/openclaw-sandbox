@@ -1,0 +1,13 @@
+services:
+  sandbox:
+    build:
+      context: ./sandbox
+      args:
+        LOCALE: es-CL
+    container_name: openclaw-sandbox
+    restart: unless-stopped
+    ports:
+      - "6080:6080"
+    environment:
+      - VNC_RESOLUTION=1280x720
+      - VNC_PASSWORD=agent

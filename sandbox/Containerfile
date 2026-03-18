@@ -1,4 +1,4 @@
-FROM ghcr.io/openclaw/openclaw:main
+FROM node:25.8-bookworm
 
 ARG LOCALE=en_US.UTF-8
 ARG TZ=UTC
@@ -10,7 +10,8 @@ ENV VNC_PASSWORD=agent
 
 USER root
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN npm install -g openclaw@latest && \
+    apt-get update && apt-get install -y --no-install-recommends \
     wget \
     xfce4 \
     xfce4-goodies \

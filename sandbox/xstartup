@@ -13,7 +13,7 @@ export DISPLAY=:0
 mkdir -p /run/user/1000
 chown agent:agent /run/user/1000
 
-export $(dbus-launch)
+eval $(dbus-launch --sh-syntax)
 export DBUS_SESSION_BUS_ADDRESS
 
-exec startxfce4
+exec /usr/bin/xfce4-session

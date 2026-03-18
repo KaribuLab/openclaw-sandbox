@@ -1,55 +1,64 @@
 FROM ghcr.io/openclaw/openclaw:main
 
 ARG LOCALE=en_US.UTF-8
+ARG TZ=UTC
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
+ENV TZ=${TZ}
 ENV VNC_RESOLUTION=1280x720
 ENV VNC_PASSWORD=agent
 
+USER root
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
-    gnupg \
-    ca-certificates \
     xfce4 \
     xfce4-goodies \
+    dbus \
     dbus-x11 \
     x11-utils \
     x11-xserver-utils \
+    xinit \
     supervisor \
     python3 \
-    python3-pip \
     xvfb \
     x11vnc \
-    xvnc4viewer \
+    tightvncpasswd \
     locales \
+    chrony \
+    chromium \
+    python3-numpy \
+    python3-pil \
+    python3-websockify \
     && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime && \
+    echo ${TZ} > /etc/timezone
 
 RUN sed -i "/${LOCALE}/s/^# //g" /etc/locale.gen && locale-gen
 
 RUN mkdir -p /opt/novnc/utils /opt/novnc/www
 
-RUN wget -q https://github.com/novnc/noVNC/archive/refs/heads/main.tar.gz -O /tmp/novnc.tar.gz && \
+RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.6.0.tar.gz -O /tmp/novnc.tar.gz && \
+    mkdir -p /opt/novnc/www && \
     tar -xzf /tmp/novnc.tar.gz -C /opt/novnc && \
-    mv /opt/novnc/noVNC-main/* /opt/novnc/www/ && \
-    rm -rf /opt/novnc/noVNC-main /tmp/novnc.tar.gz
+    mv /opt/novnc/noVNC-1.6.0/* /opt/novnc/www/ && \
+    rm -rf /tmp/novnc.tar.gz
 
-RUN wget -q https://github.com/novnc/websockify/archive/refs/heads/main.tar.gz -O /tmp/ws.tar.gz && \
+RUN wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.13.0.tar.gz -O /tmp/ws.tar.gz && \
+    mkdir -p /opt/novnc/utils && \
     tar -xzf /tmp/ws.tar.gz -C /opt/novnc/utils/ && \
-    mv /opt/novnc/websockify-main /opt/novnc/utils/websockify && \
+    mv /opt/novnc/utils/websockify-0.13.0 /opt/novnc/utils/websockify && \
     rm -rf /tmp/ws.tar.gz
 
-RUN pip3 install --no-cache-dir numpy pillow websockify
+COPY novnc-index.html /opt/novnc/www/index.html
 
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-RUN mkdir -p /var/run/dbus /var/log/dbus && \
-    dbus-daemon --system --fork || true
 
 RUN useradd -m -s /bin/bash agent && \
     echo "agent:agent" | chpasswd && \
     mkdir -p /home/agent/.vnc && \
-    echo "${VNC_PASSWORD}" | vncpasswd -f > /home/agent/.vnc/passwd && \
+    echo "${VNC_PASSWORD}" | tightvncpasswd -f > /home/agent/.vnc/passwd && \
     chmod 600 /home/agent/.vnc/passwd && \
     chown -R agent:agent /home/agent
 
@@ -64,5 +73,15 @@ RUN chown -R agent:agent /home/agent/.config
 
 RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config && \
     echo "needs_root_rights=yes" >> /etc/X11/Xwrapper.config
+
+RUN rm -f /run/dbus/pid
+
+COPY chrony.conf /etc/chrony/chrony.conf
+
+RUN mkdir -p /var/lib/chrony /run/chrony && \
+    chown _chrony:_chrony /var/lib/chrony /run/chrony
+
+RUN mkdir -p /run/dbus /run/user/1000
+RUN chown agent:agent /run/user/1000
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

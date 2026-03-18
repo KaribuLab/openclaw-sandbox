@@ -3,11 +3,16 @@ services:
     build:
       context: ./sandbox
       args:
-        LOCALE: es-CL
+        LOCALE: ${LOCALE}
+        TZ: ${TZ}
     container_name: openclaw-sandbox
     restart: unless-stopped
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_TIME
     ports:
       - "6080:6080"
     environment:
-      - VNC_RESOLUTION=1280x720
-      - VNC_PASSWORD=agent
+      - VNC_RESOLUTION=${VNC_RESOLUTION}
+      - VNC_PASSWORD=${VNC_PASSWORD}

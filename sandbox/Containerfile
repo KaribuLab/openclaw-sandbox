@@ -1,4 +1,4 @@
-FROM ghcr.io/openclaw/openclaw:main
+FROM debian:bookworm
 
 ARG LOCALE=en_US.UTF-8
 ARG TZ=UTC
@@ -7,10 +7,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=${TZ}
 ENV VNC_RESOLUTION=1280x720
 ENV VNC_PASSWORD=agent
+ENV BASH_ENV /home/agent/.bash_env
 
 USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
     wget \
     xfce4 \
     xfce4-goodies \
@@ -26,11 +29,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tightvncpasswd \
     locales \
     chrony \
-    chromium \
     python3-numpy \
     python3-pil \
     python3-websockify \
-    && rm -rf /var/lib/apt/lists/*
+    xz-utils && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then ARCH="x64"; \
+    elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi && \
+    curl -fsSL https://nodejs.org/dist/v24.10.0/node-v24.10.0-linux-${ARCH}.tar.xz \
+      | tar -xJ --strip-components=1 -C /usr/local && \
+    npx playwright install chrome
 
 RUN ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime && \
     echo ${TZ} > /etc/timezone
@@ -66,10 +76,23 @@ COPY xstartup /home/agent/.vnc/xstartup
 RUN chmod +x /home/agent/.vnc/xstartup && \
     chown agent:agent /home/agent/.vnc/xstartup
 
-RUN mkdir -p /home/agent/.config/xfce4 /home/agent/.config/xfce4/xfconf /home/agent/.config/xfce4/panel /home/agent/.config/menus
+RUN mkdir -p /home/agent/.config/xfce4 \
+    /home/agent/.config/xfce4/xfconf \
+    /home/agent/.config/xfce4/panel \
+    /home/agent/.config/menus \
+    /home/agent/.openclaw \
+    /home/agent/.playwright \
+    /home/agent/.cache \
+    /home/agent/.nvm \
+    /home/agent/.npm \
+    /home/agent/.config && \
+    touch /home/agent/.config/setup.env && \
+    echo ". /home/agent/.config/setup.env" >> /home/agent/.bashrc
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 COPY xfce-applications.menu /home/agent/.config/menus/applications.menu
-RUN chown -R agent:agent /home/agent/.config
+RUN chown -R agent:agent /home/agent
 
 RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config && \
     echo "needs_root_rights=yes" >> /etc/X11/Xwrapper.config
@@ -84,4 +107,5 @@ RUN mkdir -p /var/lib/chrony /run/chrony && \
 RUN mkdir -p /run/dbus /run/user/1000
 RUN chown agent:agent /run/user/1000
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

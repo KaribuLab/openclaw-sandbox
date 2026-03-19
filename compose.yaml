@@ -16,3 +16,18 @@ services:
     environment:
       - VNC_RESOLUTION=${VNC_RESOLUTION}
       - VNC_PASSWORD=${VNC_PASSWORD}
+      - OPENCLAW_HOME=/home/agent/.openclaw
+    volumes:
+      - openclaw-data:/home/agent/.openclaw
+      - playwright-data:/home/agent/.playwright
+      - cache-data:/home/agent/.cache
+      - nvm-data:/home/agent/.nvm
+      - npm-data:/home/agent/.npm
+      - config-data:/home/agent/.config
+volumes:
+  openclaw-data:
+  playwright-data:
+  cache-data:
+  nvm-data:
+  npm-data:
+  config-data:

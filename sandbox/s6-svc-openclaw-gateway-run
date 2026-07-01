@@ -1,0 +1,29 @@
+#!/usr/bin/with-contenv bash
+# Servicio s6-overlay LONGRUN: corre `openclaw gateway run` en foreground,
+# supervisado por s6. Auto-restart en crash, arranca en boot, independiente
+# del escritorio XFCE. Análogo a hermes-gateway-run de hermes-sandbox.
+#
+# s6 dependency ya garantiza que init-openclaw-provision retorna antes de
+# arrancar este servicio. El sentinel wait es red de seguridad adicional
+# (paranoid-mode): si la sentinela no está, gateway loop-ea hasta que esté.
+
+# Esperar a que el provisioner haya escrito la sentinela.
+while [ ! -f /config/.openclaw/.setup-done ]; do
+    echo "[openclaw-gateway] esperando sentinela /config/.openclaw/.setup-done (provisioner aun no completa)..."
+    sleep 5
+done
+
+echo "[openclaw-gateway] setup listo — arrancando gateway"
+cd /config
+# --bind loopback: en contenedor OpenClaw cambia el bind default a auto
+# (0.0.0.0) y refuse-a sin auth ("Refusing to bind gateway to auto without
+# auth"). Forzamos loopback porque el sandbox se accede solo via noVNC.
+#
+# Usamos `runuser` por la misma razón que el provisioner wrapper: en rootless
+# podman ni `s6-setuidgid` (necesita CAP_SETGID) ni `su` (pide password) son
+# viables.
+exec runuser -u abc -- env HOME=/config PATH=/usr/local/bin:/usr/bin:/bin \
+    /usr/local/bin/openclaw gateway run \
+        --allow-unconfigured \
+        --bind loopback \
+        --verbose

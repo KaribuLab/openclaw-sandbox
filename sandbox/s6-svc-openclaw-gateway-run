@@ -15,9 +15,20 @@ done
 
 echo "[openclaw-gateway] setup listo — arrancando gateway"
 cd /config
-# --bind loopback: en contenedor OpenClaw cambia el bind default a auto
-# (0.0.0.0) y refuse-a sin auth ("Refusing to bind gateway to auto without
-# auth"). Forzamos loopback porque el sandbox se accede solo via noVNC.
+# Política de bind:
+#   - Sin OPENCLAW_GATEWAY_TOKEN: --bind loopback (seguro, no expone a LAN).
+#     El gateway refuse-a bindear a `auto` (0.0.0.0) sin auth.
+#   - Con OPENCLAW_GATEWAY_TOKEN: respeta OPENCLAW_GATEWAY_BIND (default `auto`).
+#     El token escrito en openclaw.json autoriza conexiones más allá de loopback.
+#     Útil para exponer el gateway al host (port mapping) y a la LAN, ej. para
+#     OAuth callbacks de Google.
+if [ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
+    BIND_FLAG="--bind ${OPENCLAW_GATEWAY_BIND:-auto}"
+    echo "[openclaw-gateway] token presente → bind=${BIND_FLAG#--bind }"
+else
+    BIND_FLAG="--bind loopback"
+    echo "[openclaw-gateway] sin token → bind=loopback (gateway NO acepta conexiones externas)"
+fi
 #
 # Usamos `runuser` por la misma razón que el provisioner wrapper: en rootless
 # podman ni `s6-setuidgid` (necesita CAP_SETGID) ni `su` (pide password) son
@@ -25,5 +36,5 @@ cd /config
 exec runuser -u abc -- env HOME=/config PATH=/usr/local/bin:/usr/bin:/bin \
     /usr/local/bin/openclaw gateway run \
         --allow-unconfigured \
-        --bind loopback \
+        ${BIND_FLAG} \
         --verbose

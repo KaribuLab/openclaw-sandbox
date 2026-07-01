@@ -22,4 +22,5 @@ services:
     ports:
       - "3300:3000"   # webtop noVNC (KasmVNC)
       - "3301:3001"   # webtop secure noVNC (HTTPS)
+      - "8080:8080"   # OpenClaw gateway (Control UI + APIs, OAuth callbacks)
     restart: unless-stopped

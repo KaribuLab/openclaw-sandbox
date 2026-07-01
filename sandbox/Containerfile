@@ -1,111 +1,62 @@
-FROM debian:bookworm
+FROM docker.io/linuxserver/webtop:debian-xfce
 
-ARG LOCALE=en_US.UTF-8
-ARG TZ=UTC
+# Prereqs del sistema. Sin chromium/at-spi/libxtst (no usamos cua-driver;
+# openclaw trae su propio stack browser/canvas vía plugins).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl git xz-utils ca-certificates \
+        build-essential g++ \
+        ffmpeg ripgrep \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=${TZ}
-ENV VNC_RESOLUTION=1280x720
-ENV VNC_PASSWORD=agent
-ENV BASH_ENV /home/agent/.bash_env
-
-USER root
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    wget \
-    xfce4 \
-    xfce4-goodies \
-    dbus \
-    dbus-x11 \
-    x11-utils \
-    x11-xserver-utils \
-    xinit \
-    supervisor \
-    python3 \
-    xvfb \
-    x11vnc \
-    tightvncpasswd \
-    locales \
-    chrony \
-    python3-numpy \
-    python3-pil \
-    python3-websockify \
-    xz-utils && \
-    rm -rf /var/lib/apt/lists/*
-
+# Node.js v24 (OpenClaw requiere ≥ 22.19, preferimos 24). Instalado a
+# /usr/local para estar en PATH tanto para root como para abc (webtop user).
+# NO instalamos en build dentro de /config: webtop hace bind-mount de
+# /config en runtime, lo que taparía cualquier cosa escrita en build.
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then ARCH="x64"; \
     elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi && \
     curl -fsSL https://nodejs.org/dist/v24.10.0/node-v24.10.0-linux-${ARCH}.tar.xz \
-      | tar -xJ --strip-components=1 -C /usr/local && \
-    npx playwright install chrome
+      | tar -xJ --strip-components=1 -C /usr/local
 
-RUN ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime && \
-    echo ${TZ} > /etc/timezone
+# OpenClaw + Playwright CLI (instalación global). Se hace en build (NO en
+# /config) para que esté disponible ya en el primer boot.
+RUN npm install -g openclaw@latest \
+                   @playwright/cli@latest \
+    && playwright-cli install --skills || true
 
-RUN sed -i "/${LOCALE}/s/^# //g" /etc/locale.gen && locale-gen
+# Provisioner desatendido. Vive en /usr/local/bin para estar en PATH.
+COPY openclaw-provision.sh /usr/local/bin/openclaw-provision.sh
+RUN chmod +x /usr/local/bin/openclaw-provision.sh
 
-RUN mkdir -p /opt/novnc/utils /opt/novnc/www
+# -----------------------------------------------------------------------------
+# s6-overlay service definitions (análogo a hermes-sandbox)
+# -----------------------------------------------------------------------------
 
-RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.6.0.tar.gz -O /tmp/novnc.tar.gz && \
-    mkdir -p /opt/novnc/www && \
-    tar -xzf /tmp/novnc.tar.gz -C /opt/novnc && \
-    mv /opt/novnc/noVNC-1.6.0/* /opt/novnc/www/ && \
-    rm -rf /tmp/novnc.tar.gz
+# Oneshot: provisioning desatendido. Corre UNA VEZ en el primer boot y aplica
+# provider + secretos desde env vars. Idempotente vía sentinela
+# /config/.openclaw/.setup-done. Si ya provisionado, exit 0 inmediato. Si
+# falla, exit !=0 y s6 NO marca el servicio como up (el gateway queda
+# esperando sentinela — ver svc-openclaw-gateway).
+#
+# El wrapper (s6-init-openclaw-provision-run) ejecuta el provisioner via
+# s6-setuidgid abc. Sin esto, el provisioner corre como root y openclaw
+# (que corre como abc en el gateway) no puede escribir en /config/.openclaw/.
+COPY s6-init-openclaw-provision-run /etc/s6-overlay/s6-rc.d/init-openclaw-provision/run
+RUN chmod +x /etc/s6-overlay/s6-rc.d/init-openclaw-provision/run && \
+    printf 'oneshot' > /etc/s6-overlay/s6-rc.d/init-openclaw-provision/type && \
+    printf '/etc/s6-overlay/s6-rc.d/init-openclaw-provision/run' \
+        > /etc/s6-overlay/s6-rc.d/init-openclaw-provision/up && \
+    mkdir -p /etc/s6-overlay/s6-rc.d/init-openclaw-provision/dependencies.d && \
+    touch /etc/s6-overlay/s6-rc.d/init-openclaw-provision/dependencies.d/init-services && \
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/init-openclaw-provision
 
-RUN wget -q https://github.com/novnc/websockify/archive/refs/tags/v0.13.0.tar.gz -O /tmp/ws.tar.gz && \
-    mkdir -p /opt/novnc/utils && \
-    tar -xzf /tmp/ws.tar.gz -C /opt/novnc/utils/ && \
-    mv /opt/novnc/utils/websockify-0.13.0 /opt/novnc/utils/websockify && \
-    rm -rf /tmp/ws.tar.gz
-
-COPY novnc-index.html /opt/novnc/www/index.html
-
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-RUN useradd -m -s /bin/bash agent && \
-    echo "agent:agent" | chpasswd && \
-    mkdir -p /home/agent/.vnc && \
-    echo "${VNC_PASSWORD}" | tightvncpasswd -f > /home/agent/.vnc/passwd && \
-    chmod 600 /home/agent/.vnc/passwd && \
-    chown -R agent:agent /home/agent
-
-COPY xstartup /home/agent/.vnc/xstartup
-RUN chmod +x /home/agent/.vnc/xstartup && \
-    chown agent:agent /home/agent/.vnc/xstartup
-
-RUN mkdir -p /home/agent/.config/xfce4 \
-    /home/agent/.config/xfce4/xfconf \
-    /home/agent/.config/xfce4/panel \
-    /home/agent/.config/menus \
-    /home/agent/.openclaw \
-    /home/agent/.playwright \
-    /home/agent/.cache \
-    /home/agent/.nvm \
-    /home/agent/.npm \
-    /home/agent/.config && \
-    touch /home/agent/.config/setup.env && \
-    echo ". /home/agent/.config/setup.env" >> /home/agent/.bashrc
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
-COPY xfce-applications.menu /home/agent/.config/menus/applications.menu
-RUN chown -R agent:agent /home/agent
-
-RUN echo "allowed_users=anybody" > /etc/X11/Xwrapper.config && \
-    echo "needs_root_rights=yes" >> /etc/X11/Xwrapper.config
-
-RUN rm -f /run/dbus/pid
-
-COPY chrony.conf /etc/chrony/chrony.conf
-
-RUN mkdir -p /var/lib/chrony /run/chrony && \
-    chown _chrony:_chrony /var/lib/chrony /run/chrony
-
-RUN mkdir -p /run/dbus /run/user/1000
-RUN chown agent:agent /run/user/1000
-
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Longrun: gateway supervisado por s6. Auto-restart en crash, depende del
+# provisioner (s6 no lo arranca hasta que init-openclaw-provision retorna).
+COPY s6-svc-openclaw-gateway-run /etc/s6-overlay/s6-rc.d/svc-openclaw-gateway/run
+RUN chmod +x /etc/s6-overlay/s6-rc.d/svc-openclaw-gateway/run && \
+    printf 'longrun' > /etc/s6-overlay/s6-rc.d/svc-openclaw-gateway/type && \
+    mkdir -p /etc/s6-overlay/s6-rc.d/svc-openclaw-gateway/dependencies.d && \
+    touch /etc/s6-overlay/s6-rc.d/svc-openclaw-gateway/dependencies.d/init-services && \
+    touch /etc/s6-overlay/s6-rc.d/svc-openclaw-gateway/dependencies.d/init-openclaw-provision && \
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/svc-openclaw-gateway

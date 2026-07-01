@@ -1,33 +1,25 @@
 services:
-  sandbox:
-    build:
-      context: ./sandbox
-      args:
-        LOCALE: ${LOCALE}
-        TZ: ${TZ}
-    container_name: openclaw-sandbox
-    restart: unless-stopped
+  webtop:
+    build: ./sandbox
+    container_name: openclaw-webtop
     security_opt:
       - seccomp:unconfined
     cap_add:
-      - SYS_TIME
-    ports:
-      - "6080:6080"
+      - SETGID
+      - SETUID
+      - CHOWN
+      - DAC_OVERRIDE
+    # Toda la config vive en .env y se pasa COMPLETA al contenedor (env_file).
+    # Asi agregas o quitas claves OPENCLAW_AUTH_CHOICE / OPENCLAW_CFG__* /
+    # OPENCLAW_ENV__* sin tocar este archivo.
+    env_file:
+      - .env
     environment:
-      - VNC_RESOLUTION=${VNC_RESOLUTION}
-      - VNC_PASSWORD=${VNC_PASSWORD}
-      - OPENCLAW_HOME=/home/agent/.openclaw
+      - PUID=1000
+      - PGID=1000
     volumes:
-      - openclaw-data:/home/agent/.openclaw
-      - playwright-data:/home/agent/.playwright
-      - cache-data:/home/agent/.cache
-      - nvm-data:/home/agent/.nvm
-      - npm-data:/home/agent/.npm
-      - config-data:/home/agent/.config
-volumes:
-  openclaw-data:
-  playwright-data:
-  cache-data:
-  nvm-data:
-  npm-data:
-  config-data:
+      - ./config:/config
+    ports:
+      - "3300:3000"   # webtop noVNC (KasmVNC)
+      - "3301:3001"   # webtop secure noVNC (HTTPS)
+    restart: unless-stopped

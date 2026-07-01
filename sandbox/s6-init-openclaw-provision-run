@@ -1,0 +1,12 @@
+#!/usr/bin/with-contenv bash
+# Wrapper del oneshot: ejecuta el provisioner como abc (uid 1000) para que
+# todos los archivos en /config/.openclaw/* queden con ownership correcto.
+# Sin esto, el provisioner corre como root y openclaw (que corre como abc
+# en el gateway) no puede escribir adentro (EACCES al primer mkdir).
+#
+# Usamos `runuser` (util-linux) en vez de `su` o `s6-setuidgid`:
+#   - `s6-setuidgid` requiere CAP_SETGID que rootless podman no concede.
+#   - `su` pide password (abc no tiene una en la imagen webtop).
+#   - `runuser -u USER` permite a root cambiar de usuario sin password y sin
+#     setgroups() syscall, compatible con rootless podman.
+exec runuser -u abc -- /usr/local/bin/openclaw-provision.sh
